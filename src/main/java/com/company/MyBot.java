@@ -3,9 +3,7 @@ package com.company;
 import lombok.SneakyThrows;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
-import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -14,26 +12,20 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class MyBot extends TelegramLongPollingBot {
 
-    // Mahsulotlar ro'yxati
-    private final List<Product> products = Arrays.asList(
-            new Product(1, "Erkaklar klassik ko'ylagi", 150000, "https://images.unsplash.com/photo-1621072156002-e2fccdc0b176", "Yuqori sifatli erkaklar ko'ylagi"),
-            new Product(2, "Ayollar bluzasi", 120000, "https://images.unsplash.com/photo-1594633312681-425c7b97ccd1", "Zamonaviy dizayndagi ayollar bluzasi"),
-            new Product(3, "Jin shim", 200000, "https://images.unsplash.com/photo-1541840031508-326b77c9a17e", "Klassik jin shim"),
-            new Product(4, "Ayollar ko'ylagi", 180000, "https://images.unsplash.com/photo-1515372039744-b8f02a3ae446", "Chiroyli ayollar ko'ylagi"),
-            new Product(5, "Erkaklar futbolkasi", 80000, "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab", "Sport va kundalik uchun futbolka"),
-            new Product(6, "Ayollar jinsi", 160000, "https://images.unsplash.com/photo-1594633312681-425c7b97ccd1", "Moda jinsi"),
-            new Product(7, "Erkaklar kostyumi", 450000, "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d", "Rasmiy marosimlar uchun kostyum"),
-            new Product(8, "Ayollar yubkasi", 100000, "https://images.unsplash.com/photo-1583496661160-fb5886a13d14", "Zamonaviy yubka"),
-            new Product(9, "Erkaklar sportivka", 250000, "https://images.unsplash.com/photo-1556821840-3a63f95609a7", "Sport kiyimi to'plami"),
-            new Product(10, "Ayollar kurtka", 280000, "https://images.unsplash.com/photo-1551028719-00167b16eac5", "Qish uchun issiq kurtka")
-    );
+    // Har bir foydalanuvchining vazifalar ro'yxati
+    private final Map<Long, List<TodoTask>> userTasks = new HashMap<>();
 
-    // Savat (har bir foydalanuvchi uchun)
-    private final Map<Long, List<CartItem>> userCarts = new HashMap<>();
+    // Foydalanuvchi holatini saqlash (vazifa qo'shish jarayonida bo'lsa)
+    private final Map<Long, UserState> userStates = new HashMap<>();
+
+    // Vazifa ID generatori
+    private int taskIdCounter = 1;
 
     public MyBot() {
         super("7615437880:AAH5BXF9dQ1UBnmlV-nhXdGnZ6XbBQxr-cA");
@@ -59,24 +51,43 @@ public class MyBot extends TelegramLongPollingBot {
         long chatId = message.getChatId();
         String text = message.getText();
 
+        // Foydalanuvchi holatini tekshirish
+        UserState currentState = userStates.get(chatId);
+
+        if (currentState == UserState.WAITING_FOR_TASK) {
+            // Yangi vazifa qo'shish
+            addNewTask(chatId, text);
+            userStates.remove(chatId);
+            return;
+        }
+
         switch (text) {
             case "/start":
                 sendWelcomeMessage(chatId);
                 break;
-            case "🛍️ Mahsulotlar":
-                showProducts(chatId);
+            case "📝 Vazifa qo'shish":
+                startAddingTask(chatId);
                 break;
-            case "🛒 Savat":
-                showCart(chatId);
+            case "📋 Vazifalar ro'yxati":
+                showAllTasks(chatId);
                 break;
-            case "📞 Aloqa":
-                showContact(chatId);
+            case "✅ Bajarilgan vazifalar":
+                showCompletedTasks(chatId);
                 break;
-            case "ℹ️ Ma'lumot":
-                showInfo(chatId);
+            case "⏳ Bajarilmagan vazifalar":
+                showPendingTasks(chatId);
+                break;
+            case "📊 Statistika":
+                showStatistics(chatId);
+                break;
+            case "🗑️ Hammasini o'chirish":
+                confirmClearAll(chatId);
+                break;
+            case "ℹ️ Yordam":
+                showHelp(chatId);
                 break;
             default:
-                sendMessage(chatId, "Iltimos, menyudan tanlang 👇");
+                sendMessage(chatId, "❌ Noto'g'ri buyruq. Menyudan tanlang yoki /start bosing.");
         }
     }
 
@@ -85,32 +96,38 @@ public class MyBot extends TelegramLongPollingBot {
         String data = callbackQuery.getData();
         long chatId = callbackQuery.getMessage().getChatId();
 
-        if (data.startsWith("product_")) {
-            int productId = Integer.parseInt(data.split("_")[1]);
-            showProductDetail(chatId, productId);
-        } else if (data.startsWith("add_")) {
-            int productId = Integer.parseInt(data.split("_")[1]);
-            addToCart(chatId, productId);
-        } else if (data.startsWith("remove_")) {
-            int productId = Integer.parseInt(data.split("_")[1]);
-            removeFromCart(chatId, productId);
-        } else if (data.equals("clear_cart")) {
-            clearCart(chatId);
-        } else if (data.equals("checkout")) {
-            checkout(chatId);
-        } else if (data.equals("back_to_products")) {
-            showProducts(chatId);
+        if (data.startsWith("complete_")) {
+            int taskId = Integer.parseInt(data.split("_")[1]);
+            completeTask(chatId, taskId);
+        } else if (data.startsWith("delete_")) {
+            int taskId = Integer.parseInt(data.split("_")[1]);
+            deleteTask(chatId, taskId);
+        } else if (data.startsWith("uncomplete_")) {
+            int taskId = Integer.parseInt(data.split("_")[1]);
+            uncompleteTask(chatId, taskId);
+        } else if (data.equals("clear_all_confirm")) {
+            clearAllTasks(chatId);
+        } else if (data.equals("clear_all_cancel")) {
+            sendMessage(chatId, "❌ Bekor qilindi");
+        } else if (data.equals("show_all")) {
+            showAllTasks(chatId);
+        } else if (data.equals("show_pending")) {
+            showPendingTasks(chatId);
+        } else if (data.equals("show_completed")) {
+            showCompletedTasks(chatId);
         }
     }
 
     @SneakyThrows
     private void sendWelcomeMessage(long chatId) {
-        String welcomeText = "🎉 *Kiyim-Kechak Do'konimizga Xush Kelibsiz!* 🎉\n\n" +
-                "Bizda eng so'nggi moda va yuqori sifatli kiyimlar mavjud!\n\n" +
-                "🛍️ Mahsulotlarimizni ko'rish\n" +
-                "🛒 Savatchangizni tekshirish\n" +
-                "📞 Biz bilan bog'lanish\n\n" +
-                "*Hoziroq xarid qilishni boshlang!*";
+        String welcomeText = "🎯 *ToDo Bot'ga Xush Kelibsiz!* 🎯\n\n" +
+                "Bu bot sizga vazifalarni boshqarishda yordam beradi:\n\n" +
+                "📝 Yangi vazifa qo'shish\n" +
+                "📋 Vazifalar ro'yxatini ko'rish\n" +
+                "✅ Vazifalarni bajarilgan deb belgilash\n" +
+                "🗑️ Vazifalarni o'chirish\n" +
+                "📊 Statistikani ko'rish\n\n" +
+                "*Hoziroq boshlang!*";
 
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
@@ -122,172 +139,253 @@ public class MyBot extends TelegramLongPollingBot {
     }
 
     @SneakyThrows
-    private void showProducts(long chatId) {
-        SendMessage message = new SendMessage();
-        message.setChatId(chatId);
-        message.setText("🛍️ *Bizning mahsulotlarimiz:*");
-        message.setParseMode("Markdown");
-        message.setReplyMarkup(getProductsKeyboard());
-
-        execute(message);
+    private void startAddingTask(long chatId) {
+        userStates.put(chatId, UserState.WAITING_FOR_TASK);
+        sendMessage(chatId, "📝 *Yangi vazifa qo'shish*\n\nVazifa matnini kiriting:");
     }
 
     @SneakyThrows
-    private void showProductDetail(long chatId, int productId) {
-        Product product = products.stream()
-                .filter(p -> p.getId() == productId)
-                .findFirst()
-                .orElse(null);
+    private void addNewTask(long chatId, String taskText) {
+        List<TodoTask> tasks = userTasks.computeIfAbsent(chatId, k -> new ArrayList<>());
 
-        if (product == null) return;
-
-        SendPhoto photo = new SendPhoto();
-        photo.setChatId(chatId);
-        photo.setPhoto(new InputFile(product.getImageUrl()));
-
-        String caption = String.format(
-                "*%s*\n\n" +
-                        "💰 Narxi: *%,d so'm*\n\n" +
-                        "📝 Ta'rif: %s\n\n" +
-                        "Qo'shish uchun tugmani bosing 👇",
-                product.getName(),
-                product.getPrice(),
-                product.getDescription()
+        TodoTask newTask = new TodoTask(
+                taskIdCounter++,
+                taskText,
+                LocalDateTime.now(),
+                false
         );
 
-        photo.setCaption(caption);
-        photo.setParseMode("Markdown");
-        photo.setReplyMarkup(getProductDetailKeyboard(productId));
+        tasks.add(newTask);
 
-        execute(photo);
+        sendMessage(chatId, "✅ *Vazifa muvaffaqiyatli qo'shildi!*\n\n" +
+                "📝 Vazifa: " + taskText + "\n" +
+                "🕒 Vaqt: " + newTask.getCreatedAt().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")));
     }
 
     @SneakyThrows
-    private void showCart(long chatId) {
-        List<CartItem> cart = userCarts.getOrDefault(chatId, new ArrayList<>());
+    private void showAllTasks(long chatId) {
+        List<TodoTask> tasks = userTasks.getOrDefault(chatId, new ArrayList<>());
 
-        if (cart.isEmpty()) {
-            sendMessage(chatId, "🛒 Savatingiz bo'sh\n\nMahsulot qo'shish uchun 'Mahsulotlar' bo'limiga o'ting");
+        if (tasks.isEmpty()) {
+            sendMessage(chatId, "📋 *Vazifalar ro'yxati bo'sh*\n\nYangi vazifa qo'shish uchun '📝 Vazifa qo'shish' tugmasini bosing.");
             return;
         }
 
-        StringBuilder text = new StringBuilder("🛒 *Savatingiz:*\n\n");
-        int total = 0;
+        StringBuilder text = new StringBuilder("📋 *Barcha vazifalar:*\n\n");
 
-        for (CartItem item : cart) {
-            Product product = getProductById(item.getProductId());
-            if (product != null) {
-                int itemTotal = product.getPrice() * item.getQuantity();
-                text.append(String.format("• %s\n  Miqdor: %d × %,d = *%,d so'm*\n\n",
-                        product.getName(), item.getQuantity(), product.getPrice(), itemTotal));
-                total += itemTotal;
-            }
+        for (TodoTask task : tasks) {
+            String status = task.isCompleted() ? "✅" : "⏳";
+            text.append(String.format("%s *%d.* %s\n", status, task.getId(), task.getText()));
+            text.append(String.format("🕒 %s\n\n",
+                    task.getCreatedAt().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))));
         }
-
-        text.append(String.format("💰 *Jami: %,d so'm*", total));
 
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
         message.setText(text.toString());
         message.setParseMode("Markdown");
-        message.setReplyMarkup(getCartKeyboard());
+        message.setReplyMarkup(getTasksKeyboard(tasks));
 
         execute(message);
     }
 
     @SneakyThrows
-    private void showContact(long chatId) {
-        String contactText = "📞 *Biz bilan bog'laning:*\n\n" +
-                "📱 Telefon: +998 90 123 45 67\n" +
-                "📱 Telegram: @kiyim_dokani\n" +
-                "📧 Email: info@kiyimdokani.uz\n" +
-                "🏢 Manzil: Toshkent sh., Amir Temur ko'chasi 15\n\n" +
-                "🕒 Ish vaqti: 9:00 - 21:00 (har kuni)";
+    private void showPendingTasks(long chatId) {
+        List<TodoTask> allTasks = userTasks.getOrDefault(chatId, new ArrayList<>());
+        List<TodoTask> pendingTasks = new ArrayList<>();
 
-        sendMessage(chatId, contactText);
-    }
-
-    @SneakyThrows
-    private void showInfo(long chatId) {
-        String infoText = "ℹ️ *Do'kon haqida ma'lumot:*\n\n" +
-                "🎯 Bizning maqsadimiz - sizga eng yaxshi kiyimlarni taqdim etish!\n\n" +
-                "✅ Yuqori sifat\n" +
-                "✅ Arzon narxlar\n" +
-                "✅ Tez yetkazib berish\n" +
-                "✅ Kafolat beriladigan xizmat\n\n" +
-                "🚚 *Yetkazib berish:*\n" +
-                "• Toshkent bo'ylab - 20,000 so'm\n" +
-                "• Viloyatlarga - 35,000 so'm\n" +
-                "• 500,000 so'mdan yuqori xaridlarda - BEPUL!\n\n" +
-                "💳 *To'lov usullari:*\n" +
-                "• Naqd pul\n" +
-                "• Plastik karta\n" +
-                "• Bank o'tkazmasi";
-
-        sendMessage(chatId, infoText);
-    }
-
-    private void addToCart(long chatId, int productId) {
-        List<CartItem> cart = userCarts.computeIfAbsent(chatId, k -> new ArrayList<>());
-
-        CartItem existingItem = cart.stream()
-                .filter(item -> item.getProductId() == productId)
-                .findFirst()
-                .orElse(null);
-
-        if (existingItem != null) {
-            existingItem.setQuantity(existingItem.getQuantity() + 1);
-        } else {
-            cart.add(new CartItem(productId, 1));
+        for (TodoTask task : allTasks) {
+            if (!task.isCompleted()) {
+                pendingTasks.add(task);
+            }
         }
 
-        Product product = getProductById(productId);
-        sendMessage(chatId, "✅ " + product.getName() + " savatga qo'shildi!");
-    }
-
-    private void removeFromCart(long chatId, int productId) {
-        List<CartItem> cart = userCarts.get(chatId);
-        if (cart != null) {
-            cart.removeIf(item -> item.getProductId() == productId);
-            sendMessage(chatId, "🗑️ Mahsulot savatdan olib tashlandi");
-        }
-    }
-
-    private void clearCart(long chatId) {
-        userCarts.remove(chatId);
-        sendMessage(chatId, "🗑️ Savat tozalandi");
-    }
-
-    @SneakyThrows
-    private void checkout(long chatId) {
-        List<CartItem> cart = userCarts.get(chatId);
-        if (cart == null || cart.isEmpty()) {
-            sendMessage(chatId, "Savatingiz bo'sh!");
+        if (pendingTasks.isEmpty()) {
+            sendMessage(chatId, "⏳ *Bajarilmagan vazifalar yo'q*\n\nBarcha vazifalar bajarilgan! 🎉");
             return;
         }
 
-        int total = cart.stream()
-                .mapToInt(item -> {
-                    Product product = getProductById(item.getProductId());
-                    return product != null ? product.getPrice() * item.getQuantity() : 0;
-                })
-                .sum();
+        StringBuilder text = new StringBuilder("⏳ *Bajarilmagan vazifalar:*\n\n");
 
-        String orderText = "✅ *Buyurtmangiz qabul qilindi!*\n\n" +
-                String.format("💰 Jami summa: *%,d so'm*\n\n", total) +
-                "📞 Tez orada operatorlarimiz siz bilan bog'lanishadi.\n\n" +
-                "🚚 Yetkazib berish 1-2 kun ichida amalga oshiriladi.\n\n" +
-                "*Xarid uchun rahmat!* 🙏";
+        for (TodoTask task : pendingTasks) {
+            text.append(String.format("⏳ *%d.* %s\n", task.getId(), task.getText()));
+            text.append(String.format("🕒 %s\n\n",
+                    task.getCreatedAt().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))));
+        }
 
-        clearCart(chatId);
-        sendMessage(chatId, orderText);
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(text.toString());
+        message.setParseMode("Markdown");
+        message.setReplyMarkup(getTasksKeyboard(pendingTasks));
+
+        execute(message);
     }
 
-    private Product getProductById(int id) {
-        return products.stream()
-                .filter(p -> p.getId() == id)
-                .findFirst()
-                .orElse(null);
+    @SneakyThrows
+    private void showCompletedTasks(long chatId) {
+        List<TodoTask> allTasks = userTasks.getOrDefault(chatId, new ArrayList<>());
+        List<TodoTask> completedTasks = new ArrayList<>();
+
+        for (TodoTask task : allTasks) {
+            if (task.isCompleted()) {
+                completedTasks.add(task);
+            }
+        }
+
+        if (completedTasks.isEmpty()) {
+            sendMessage(chatId, "✅ *Bajarilgan vazifalar yo'q*\n\nHali hech qanday vazifa bajarilmagan.");
+            return;
+        }
+
+        StringBuilder text = new StringBuilder("✅ *Bajarilgan vazifalar:*\n\n");
+
+        for (TodoTask task : completedTasks) {
+            text.append(String.format("✅ *%d.* %s\n", task.getId(), task.getText()));
+            text.append(String.format("🕒 %s\n",
+                    task.getCreatedAt().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))));
+            if (task.getCompletedAt() != null) {
+                text.append(String.format("✅ Bajarildi: %s\n",
+                        task.getCompletedAt().format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))));
+            }
+            text.append("\n");
+        }
+
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(text.toString());
+        message.setParseMode("Markdown");
+        message.setReplyMarkup(getCompletedTasksKeyboard(completedTasks));
+
+        execute(message);
+    }
+
+    @SneakyThrows
+    private void showStatistics(long chatId) {
+        List<TodoTask> tasks = userTasks.getOrDefault(chatId, new ArrayList<>());
+
+        if (tasks.isEmpty()) {
+            sendMessage(chatId, "📊 *Statistika*\n\nHali vazifalar yo'q.");
+            return;
+        }
+
+        int totalTasks = tasks.size();
+        int completedTasks = 0;
+        int pendingTasks = 0;
+
+        for (TodoTask task : tasks) {
+            if (task.isCompleted()) {
+                completedTasks++;
+            } else {
+                pendingTasks++;
+            }
+        }
+
+        double completionRate = totalTasks > 0 ? (completedTasks * 100.0 / totalTasks) : 0;
+
+        String statisticsText = String.format(
+                "📊 *Statistika*\n\n" +
+                        "📝 Jami vazifalar: *%d*\n" +
+                        "✅ Bajarilgan: *%d*\n" +
+                        "⏳ Bajarilmagan: *%d*\n" +
+                        "📈 Bajarilish foizi: *%.1f%%*\n\n" +
+                        "🎯 Davom eting!",
+                totalTasks, completedTasks, pendingTasks, completionRate
+        );
+
+        sendMessage(chatId, statisticsText);
+    }
+
+    @SneakyThrows
+    private void confirmClearAll(long chatId) {
+        List<TodoTask> tasks = userTasks.getOrDefault(chatId, new ArrayList<>());
+
+        if (tasks.isEmpty()) {
+            sendMessage(chatId, "🗑️ O'chiradigan vazifalar yo'q.");
+            return;
+        }
+
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText("⚠️ *Diqqat!*\n\nBarcha vazifalarni o'chirishni xohlaysizmi?\n\nBu amalni qaytarib bo'lmaydi!");
+        message.setParseMode("Markdown");
+        message.setReplyMarkup(getClearAllKeyboard());
+
+        execute(message);
+    }
+
+    @SneakyThrows
+    private void clearAllTasks(long chatId) {
+        userTasks.remove(chatId);
+        sendMessage(chatId, "🗑️ *Barcha vazifalar o'chirildi*\n\nYangi vazifa qo'shishni boshlashingiz mumkin!");
+    }
+
+    @SneakyThrows
+    private void showHelp(long chatId) {
+        String helpText = "ℹ️ *ToDo Bot Yordam*\n\n" +
+                "*Asosiy funksiyalar:*\n\n" +
+                "📝 *Vazifa qo'shish* - Yangi vazifa yaratish\n" +
+                "📋 *Vazifalar ro'yxati* - Barcha vazifalarni ko'rish\n" +
+                "✅ *Bajarilgan vazifalar* - Tugallangan vazifalar\n" +
+                "⏳ *Bajarilmagan vazifalar* - Kutilayotgan vazifalar\n" +
+                "📊 *Statistika* - Umumiy ma'lumotlar\n" +
+                "🗑️ *Hammasini o'chirish* - Barcha vazifalarni tozalash\n\n" +
+                "*Tugmalar:*\n" +
+                "✅ - Vazifani bajarilgan deb belgilash\n" +
+                "❌ - Vazifani o'chirish\n" +
+                "↩️ - Vazifani qayta bajarilmagan qilish\n\n" +
+                "*Maslahat:* Vazifalarni qisqa va aniq yozing!";
+
+        sendMessage(chatId, helpText);
+    }
+
+    private void completeTask(long chatId, int taskId) {
+        List<TodoTask> tasks = userTasks.get(chatId);
+        if (tasks != null) {
+            for (TodoTask task : tasks) {
+                if (task.getId() == taskId) {
+                    task.setCompleted(true);
+                    task.setCompletedAt(LocalDateTime.now());
+                    sendMessage(chatId, "✅ Vazifa bajarilgan deb belgilandi:\n*" + task.getText() + "*");
+                    return;
+                }
+            }
+        }
+        sendMessage(chatId, "❌ Vazifa topilmadi");
+    }
+
+    private void uncompleteTask(long chatId, int taskId) {
+        List<TodoTask> tasks = userTasks.get(chatId);
+        if (tasks != null) {
+            for (TodoTask task : tasks) {
+                if (task.getId() == taskId) {
+                    task.setCompleted(false);
+                    task.setCompletedAt(null);
+                    sendMessage(chatId, "⏳ Vazifa qayta bajarilmagan qilindi:\n*" + task.getText() + "*");
+                    return;
+                }
+            }
+        }
+        sendMessage(chatId, "❌ Vazifa topilmadi");
+    }
+
+    private void deleteTask(long chatId, int taskId) {
+        List<TodoTask> tasks = userTasks.get(chatId);
+        if (tasks != null) {
+            TodoTask taskToRemove = null;
+            for (TodoTask task : tasks) {
+                if (task.getId() == taskId) {
+                    taskToRemove = task;
+                    break;
+                }
+            }
+            if (taskToRemove != null) {
+                tasks.remove(taskToRemove);
+                sendMessage(chatId, "🗑️ Vazifa o'chirildi:\n*" + taskToRemove.getText() + "*");
+                return;
+            }
+        }
+        sendMessage(chatId, "❌ Vazifa topilmadi");
     }
 
     @SneakyThrows
@@ -306,30 +404,48 @@ public class MyBot extends TelegramLongPollingBot {
         List<KeyboardRow> rows = new ArrayList<>();
 
         KeyboardRow row1 = new KeyboardRow();
-        row1.add(new KeyboardButton("🛍️ Mahsulotlar"));
-        row1.add(new KeyboardButton("🛒 Savat"));
+        row1.add(new KeyboardButton("📝 Vazifa qo'shish"));
+        row1.add(new KeyboardButton("📋 Vazifalar ro'yxati"));
 
         KeyboardRow row2 = new KeyboardRow();
-        row2.add(new KeyboardButton("📞 Aloqa"));
-        row2.add(new KeyboardButton("ℹ️ Ma'lumot"));
+        row2.add(new KeyboardButton("✅ Bajarilgan vazifalar"));
+        row2.add(new KeyboardButton("⏳ Bajarilmagan vazifalar"));
+
+        KeyboardRow row3 = new KeyboardRow();
+        row3.add(new KeyboardButton("📊 Statistika"));
+        row3.add(new KeyboardButton("🗑️ Hammasini o'chirish"));
+
+        KeyboardRow row4 = new KeyboardRow();
+        row4.add(new KeyboardButton("ℹ️ Yordam"));
 
         rows.add(row1);
         rows.add(row2);
+        rows.add(row3);
+        rows.add(row4);
 
         keyboard.setKeyboard(rows);
         return keyboard;
     }
 
-    private InlineKeyboardMarkup getProductsKeyboard() {
+    private InlineKeyboardMarkup getTasksKeyboard(List<TodoTask> tasks) {
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
-        for (Product product : products) {
+        for (TodoTask task : tasks) {
             List<InlineKeyboardButton> row = new ArrayList<>();
-            InlineKeyboardButton button = new InlineKeyboardButton();
-            button.setText(product.getName() + " - " + String.format("%,d so'm", product.getPrice()));
-            button.setCallbackData("product_" + product.getId());
-            row.add(button);
+
+            if (!task.isCompleted()) {
+                InlineKeyboardButton completeBtn = new InlineKeyboardButton();
+                completeBtn.setText("✅");
+                completeBtn.setCallbackData("complete_" + task.getId());
+                row.add(completeBtn);
+            }
+
+            InlineKeyboardButton deleteBtn = new InlineKeyboardButton();
+            deleteBtn.setText("🗑️");
+            deleteBtn.setCallbackData("delete_" + task.getId());
+            row.add(deleteBtn);
+
             rows.add(row);
         }
 
@@ -337,87 +453,79 @@ public class MyBot extends TelegramLongPollingBot {
         return keyboard;
     }
 
-    private InlineKeyboardMarkup getProductDetailKeyboard(int productId) {
+    private InlineKeyboardMarkup getCompletedTasksKeyboard(List<TodoTask> tasks) {
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
-        List<InlineKeyboardButton> row1 = new ArrayList<>();
-        InlineKeyboardButton addButton = new InlineKeyboardButton();
-        addButton.setText("🛒 Savatga qo'shish");
-        addButton.setCallbackData("add_" + productId);
-        row1.add(addButton);
-        rows.add(row1);
+        for (TodoTask task : tasks) {
+            List<InlineKeyboardButton> row = new ArrayList<>();
 
-        List<InlineKeyboardButton> row2 = new ArrayList<>();
-        InlineKeyboardButton backButton = new InlineKeyboardButton();
-        backButton.setText("⬅️ Orqaga");
-        backButton.setCallbackData("back_to_products");
-        row2.add(backButton);
-        rows.add(row2);
+            InlineKeyboardButton uncompleteBtn = new InlineKeyboardButton();
+            uncompleteBtn.setText("↩️");
+            uncompleteBtn.setCallbackData("uncomplete_" + task.getId());
+            row.add(uncompleteBtn);
 
-        keyboard.setKeyboard(rows);
-        return keyboard;
-    }
+            InlineKeyboardButton deleteBtn = new InlineKeyboardButton();
+            deleteBtn.setText("🗑️");
+            deleteBtn.setCallbackData("delete_" + task.getId());
+            row.add(deleteBtn);
 
-    private InlineKeyboardMarkup getCartKeyboard() {
-        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-
-        List<InlineKeyboardButton> row1 = new ArrayList<>();
-        InlineKeyboardButton checkoutButton = new InlineKeyboardButton();
-        checkoutButton.setText("✅ Buyurtma berish");
-        checkoutButton.setCallbackData("checkout");
-        row1.add(checkoutButton);
-        rows.add(row1);
-
-        List<InlineKeyboardButton> row2 = new ArrayList<>();
-        InlineKeyboardButton clearButton = new InlineKeyboardButton();
-        clearButton.setText("🗑️ Savatni tozalash");
-        clearButton.setCallbackData("clear_cart");
-        row2.add(clearButton);
-        rows.add(row2);
-
-        keyboard.setKeyboard(rows);
-        return keyboard;
-    }
-
-    // Product sinfi
-    public static class Product {
-        private int id;
-        private String name;
-        private int price;
-        private String imageUrl;
-        private String description;
-
-        public Product(int id, String name, int price, String imageUrl, String description) {
-            this.id = id;
-            this.name = name;
-            this.price = price;
-            this.imageUrl = imageUrl;
-            this.description = description;
+            rows.add(row);
         }
 
-        // Getters
-        public int getId() { return id; }
-        public String getName() { return name; }
-        public int getPrice() { return price; }
-        public String getImageUrl() { return imageUrl; }
-        public String getDescription() { return description; }
+        keyboard.setKeyboard(rows);
+        return keyboard;
     }
 
-    // CartItem sinfi
-    public static class CartItem {
-        private int productId;
-        private int quantity;
+    private InlineKeyboardMarkup getClearAllKeyboard() {
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
-        public CartItem(int productId, int quantity) {
-            this.productId = productId;
-            this.quantity = quantity;
+        List<InlineKeyboardButton> row = new ArrayList<>();
+
+        InlineKeyboardButton confirmBtn = new InlineKeyboardButton();
+        confirmBtn.setText("✅ Ha, o'chirish");
+        confirmBtn.setCallbackData("clear_all_confirm");
+        row.add(confirmBtn);
+
+        InlineKeyboardButton cancelBtn = new InlineKeyboardButton();
+        cancelBtn.setText("❌ Bekor qilish");
+        cancelBtn.setCallbackData("clear_all_cancel");
+        row.add(cancelBtn);
+
+        rows.add(row);
+        keyboard.setKeyboard(rows);
+        return keyboard;
+    }
+
+    // TodoTask sinfi
+    public static class TodoTask {
+        private int id;
+        private String text;
+        private LocalDateTime createdAt;
+        private LocalDateTime completedAt;
+        private boolean completed;
+
+        public TodoTask(int id, String text, LocalDateTime createdAt, boolean completed) {
+            this.id = id;
+            this.text = text;
+            this.createdAt = createdAt;
+            this.completed = completed;
         }
 
         // Getters and Setters
-        public int getProductId() { return productId; }
-        public int getQuantity() { return quantity; }
-        public void setQuantity(int quantity) { this.quantity = quantity; }
+        public int getId() { return id; }
+        public String getText() { return text; }
+        public LocalDateTime getCreatedAt() { return createdAt; }
+        public LocalDateTime getCompletedAt() { return completedAt; }
+        public boolean isCompleted() { return completed; }
+
+        public void setCompleted(boolean completed) { this.completed = completed; }
+        public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
+    }
+
+    // UserState enum
+    public enum UserState {
+        WAITING_FOR_TASK
     }
 }
