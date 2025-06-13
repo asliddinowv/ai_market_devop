@@ -36,12 +36,12 @@ public class MyBot extends TelegramLongPollingBot {
     private final Map<Long, List<CartItem>> userCarts = new HashMap<>();
 
     public MyBot() {
-        super("8064135953:AAGOzgCOdq_81YmaqNdkDareIuM12DDfQz4");
+        super("7615437880:AAH5BXF9dQ1UBnmlV-nhXdGnZ6XbBQxr-cA");
     }
 
     @Override
     public String getBotUsername() {
-        return "https://t.me/message_sender_uzbot";
+        return "@javacoursespdp_bot";
     }
 
     @SneakyThrows
